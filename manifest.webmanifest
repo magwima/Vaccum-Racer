@@ -1,0 +1,16 @@
+{
+  "name": "Vacuum Racer",
+  "short_name": "Vacuum Racer",
+  "description": "Race Dave, Rosie and Dasz across three tracks. Suck up every ball, boost and smash your rivals.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#1b1b1f",
+  "theme_color": "#1b1b1f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
