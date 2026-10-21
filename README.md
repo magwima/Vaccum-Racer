@@ -14,6 +14,8 @@ A 3D racing game in the browser. Pick Dave, Rosie or Dasz, race across three tra
 | --- | --- |
 | `index.html` | The game |
 | `three.min.js` | three.js r128, the 3D library (MIT licence, see `LICENSE-three.txt`) |
+| `GLTFLoader.js` | three.js r128 loader for the 3D truck models (same MIT licence) |
+| `models/dave.glb`, `rosie.glb`, `dasz.glb` | The trucks, modelled in Blender. Wheels are added in code so they can spin and steer |
 | `sw.js` | Lets the game work offline after the first visit |
 | `manifest.webmanifest`, `icon*.png`, `icon.svg`, `apple-touch-icon.png` | App name and icons for installing on a phone |
 | `.nojekyll` | Tells GitHub Pages to publish the files exactly as they are |

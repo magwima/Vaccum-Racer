@@ -245,6 +245,7 @@
 <!-- Three.js: free library that draws 3D graphics in the browser -->
 <script src="three.min.js"></script>
 <script>if(!window.THREE) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');</script>
+<script src="GLTFLoader.js"></script>
 
 <script>
 /* =====================================================================
@@ -734,7 +735,59 @@ function buildCourse() {
 }
 
 /* ---------- 6. TRUCK MODELS ---------- */
+/* 3D bodies modelled in Blender (models/*.glb). The wheels were cut out of the models and are
+   added below in code so they can spin and steer. Numbers: scale to game size, lift so the
+   wheels touch the ground, wheel positions [x, y, z], nozzle mouth [x, y, z, radius]. */
+const TRUCK_GLB = {
+  dave:  { scale: 0.3307, lift: 2.191, wheelR: 0.752, wheelW: 0.84, nozzle: [4.537, 1.383, -0.012, 0.533],
+           wheels: [[2.004, 0.74, -1.045], [2.004, 0.74, 1.045], [-2.494, 0.72, -1.04], [-2.494, 0.72, 1.04]] },
+  rosie: { scale: 0.3436, lift: 2.294, wheelR: 0.759, wheelW: 0.8, nozzle: [4.511, 1.355, -0.003, 0.701],
+           wheels: [[2.22, 0.751, -1.173], [2.22, 0.751, 1.173], [-2.33, 0.717, -1.132], [-2.33, 0.717, 1.132]] },
+  dasz:  { scale: 0.271, lift: 2.275, wheelR: 0.704, wheelW: 1.1, nozzle: [4.499, 1.324, -0.011, 0.646],
+           wheels: [[1.279, 0.603, -1.183], [1.279, 0.603, 1.183], [-1.756, 0.652, -1.172], [-1.756, 0.652, 1.172]] }
+};
+function loadTruckModels() {
+  if (!THREE.GLTFLoader) return Promise.resolve();
+  const loader = new THREE.GLTFLoader();
+  const one = key => new Promise(res => loader.load(`models/${key}.glb`, gltf => {
+    gltf.scene.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = true; o.userData.shared = true;
+      if (o.material) { o.material.metalness = Math.min(o.material.metalness, 0.3); o.material.userData.shared = true; }
+    });
+    TRUCK_GLB[key].scene = gltf.scene; res();
+  }, undefined, () => res()));          // if a model fails, that truck falls back to the box version
+  const all = Promise.all(Object.keys(TRUCK_GLB).map(one));
+  return Promise.race([all, new Promise(res => setTimeout(res, 15000))]);
+}
+function buildGlbTruck(def, G) {
+  const g = new THREE.Group(), model = new THREE.Group(); g.add(model);
+  const body = G.scene.clone();
+  body.scale.setScalar(G.scale); body.rotation.y = Math.PI; body.position.y = G.lift;   // model faces -x, game faces +x
+  model.add(body);
+  // Nozzle glow: an invisible ring at the mouth that lights up while vacuuming
+  const [nx, ny, nz, nr] = G.nozzle;
+  const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x4fd1c5, emissive: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0, depthWrite: false });
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(nr * 1.15, nr * 0.8, 0.5, 22, 1, true), nozzleMat);
+  nozzle.position.set(nx - 0.15, ny, nz); nozzle.rotation.z = -Math.PI / 2; model.add(nozzle);
+  // Wheels: steer group → spin group → tyre, rim and hub (the bar on the hub shows the spin)
+  const wheels = [];
+  const wGeo = new THREE.CylinderGeometry(G.wheelR, G.wheelR, G.wheelW, 22), wMat = mat(0x1d1d1d, { roughness: 0.9 });
+  const rimGeo = new THREE.CylinderGeometry(G.wheelR * 0.55, G.wheelR * 0.55, G.wheelW + 0.04, 16), rimM = mat(def.body, { roughness: 0.4, metalness: 0.3 });
+  const hubGeo = new THREE.BoxGeometry(G.wheelR * 1.1, G.wheelR * 0.22, G.wheelW + 0.08), hubM = mat(0xd8d8d8, { metalness: 0.7, roughness: 0.3 });
+  for (const [wx, wy, wz] of G.wheels) {
+    const steer = new THREE.Group(); steer.position.set(wx, wy, wz); model.add(steer);
+    const spin = new THREE.Group(); steer.add(spin);
+    const t = new THREE.Mesh(wGeo, wMat); t.rotation.x = Math.PI / 2; t.castShadow = true; spin.add(t);
+    const rim = new THREE.Mesh(rimGeo, rimM); rim.rotation.x = Math.PI / 2; spin.add(rim);
+    spin.add(new THREE.Mesh(hubGeo, hubM));
+    wheels.push({ steer, spin, front: wx > 0 });
+  }
+  return { group: g, model, wheels, nozzle, nozzleMat, pupils: [], glb: true };
+}
 function buildTruck(def) {
+  const G = TRUCK_GLB[def.name.toLowerCase()];
+  if (G && G.scene) return buildGlbTruck(def, G);
   const g = new THREE.Group(), model = new THREE.Group(); g.add(model);
   const P = (geo, m, x, y, z) => addTo(model, geo, m, x, y, z);
   const body = mat(def.body, { roughness: 0.55, metalness: 0.15 }), tank = mat(def.tank, { roughness: 0.45, metalness: 0.2 });
@@ -906,7 +959,7 @@ function makeRacer(key, isAI, lat, z) {
   return r;
 }
 function clearRacers() {
-  racers.forEach(r => { scene.remove(r.m.group); r.m.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); });
+  racers.forEach(r => { scene.remove(r.m.group); r.m.group.traverse(o => { if (o.userData.shared) return; if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); });
   racers = []; player = null;
 }
 function setupRacers() {
@@ -1154,6 +1207,7 @@ function syncModel(r, steer, dt) {
   r.m.wheels.forEach(w => { w.spin.rotation.z = r.wheelRot; if (w.front) w.steer.rotation.y = -r.steerVis * 0.4; });
   const on = r.vacuum;
   r.m.nozzleMat.emissive.setHex(on ? 0x4fd1c5 : 0x000000); r.m.nozzleMat.emissiveIntensity = on ? 0.7 : 0;
+  if (r.m.glb) r.m.nozzleMat.opacity = on ? 0.75 : 0;
   const s = on ? 1 + Math.sin(time * 25) * 0.06 : 1; r.m.nozzle.scale.set(s, 1, s);
   const look = on ? 0.06 : 0; r.m.pupils.forEach(p => { p.position.x = 2.95 + look; });
 }
@@ -1506,12 +1560,13 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-// Start on the menu with the last track and truck
+// Start on the menu with the last track and truck (show the box trucks straight away, swap in the 3D models once loaded)
 buildLevel(LEVELS[levelIndex]);
 setupRacers();
 renderMenu();
 updateCamera(0, true);
 requestAnimationFrame(frame);
+loadTruckModels().then(() => { if (state === 'menu') setupRacers(); });
 </script>
 <script>
 /* Offline play and "Add to Home Screen": GitHub Pages serves over HTTPS, so the service worker can cache the game. */
