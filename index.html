@@ -739,8 +739,10 @@ function buildCourse() {
    added below in code so they can spin and steer. Numbers: scale to game size, lift so the
    wheels touch the ground, wheel positions [x, y, z], nozzle mouth [x, y, z, radius]. */
 const TRUCK_GLB = {
-  dave:  { scale: 0.3307, lift: 2.191, wheelR: 0.752, wheelW: 0.84, nozzle: [4.537, 1.383, -0.012, 0.533],
-           wheels: [[2.004, 0.74, -1.045], [2.004, 0.74, 1.045], [-2.494, 0.72, -1.04], [-2.494, 0.72, 1.04]] },
+  // Dave drives MOONBEAM, a yellow rally Mini built from a blueprint sheet (models/mini.glb, already at game size).
+  // wheelTex: the gold rim and Dunlop tread from the same sheet, painted on the code wheels.
+  dave:  { file: 'mini', scale: 1.25, lift: 0, wheelR: 0.875, wheelW: 0.78, nozzle: [4.15, 1.19, 0, 0.52], wheelTex: true,
+           wheels: [[2.743, 0.875, -1.79], [2.743, 0.875, 1.79], [-2.786, 0.875, -1.79], [-2.786, 0.875, 1.79]] },
   rosie: { scale: 0.3436, lift: 2.294, wheelR: 0.759, wheelW: 0.8, nozzle: [4.511, 1.355, -0.003, 0.701],
            wheels: [[2.22, 0.751, -1.173], [2.22, 0.751, 1.173], [-2.33, 0.717, -1.132], [-2.33, 0.717, 1.132]] },
   dasz:  { scale: 0.271, lift: 2.275, wheelR: 0.704, wheelW: 1.1, nozzle: [4.499, 1.324, -0.011, 0.646],
@@ -749,7 +751,7 @@ const TRUCK_GLB = {
 function loadTruckModels() {
   if (!THREE.GLTFLoader) return Promise.resolve();
   const loader = new THREE.GLTFLoader();
-  const one = key => new Promise(res => loader.load(`models/${key}.glb`, gltf => {
+  const one = key => new Promise(res => loader.load(`models/${TRUCK_GLB[key].file || key}.glb`, gltf => {
     gltf.scene.traverse(o => {
       if (!o.isMesh) return;
       o.castShadow = true; o.receiveShadow = true; o.userData.shared = true;
@@ -772,15 +774,25 @@ function buildGlbTruck(def, G) {
   nozzle.position.set(nx - 0.15, ny, nz); nozzle.rotation.z = -Math.PI / 2; model.add(nozzle);
   // Wheels: steer group → spin group → tyre, rim and hub (the bar on the hub shows the spin)
   const wheels = [];
-  const wGeo = new THREE.CylinderGeometry(G.wheelR, G.wheelR, G.wheelW, 22), wMat = mat(0x1d1d1d, { roughness: 0.9 });
+  const wGeo = new THREE.CylinderGeometry(G.wheelR, G.wheelR, G.wheelW, 22);
+  let wMat = mat(0x1d1d1d, { roughness: 0.9 });
+  if (G.wheelTex) {   // textured tyre: tread round the side, the painted rim on both faces
+    if (!G.wheelMats) {   // made once and shared by every race, so the cleanup keeps them
+      const tl = new THREE.TextureLoader(), tread = tl.load('models/mini-tread.jpg'), rimTex = tl.load('models/mini-wheel.png');
+      tread.wrapS = tread.wrapT = THREE.RepeatWrapping; tread.repeat.set(6, 1);
+      const face = new THREE.MeshStandardMaterial({ map: rimTex, transparent: true, alphaTest: 0.4, roughness: 0.6, metalness: 0.2 });
+      G.wheelMats = [new THREE.MeshStandardMaterial({ map: tread, roughness: 0.9 }), face, face];
+      G.wheelMats.forEach(m => m.userData.shared = true);
+    }
+    wMat = G.wheelMats;
+  }
   const rimGeo = new THREE.CylinderGeometry(G.wheelR * 0.55, G.wheelR * 0.55, G.wheelW + 0.04, 16), rimM = mat(def.body, { roughness: 0.4, metalness: 0.3 });
   const hubGeo = new THREE.BoxGeometry(G.wheelR * 1.1, G.wheelR * 0.22, G.wheelW + 0.08), hubM = mat(0xd8d8d8, { metalness: 0.7, roughness: 0.3 });
   for (const [wx, wy, wz] of G.wheels) {
     const steer = new THREE.Group(); steer.position.set(wx, wy, wz); model.add(steer);
     const spin = new THREE.Group(); steer.add(spin);
     const t = new THREE.Mesh(wGeo, wMat); t.rotation.x = Math.PI / 2; t.castShadow = true; spin.add(t);
-    const rim = new THREE.Mesh(rimGeo, rimM); rim.rotation.x = Math.PI / 2; spin.add(rim);
-    spin.add(new THREE.Mesh(hubGeo, hubM));
+    if (!G.wheelTex) { const rim = new THREE.Mesh(rimGeo, rimM); rim.rotation.x = Math.PI / 2; spin.add(rim); spin.add(new THREE.Mesh(hubGeo, hubM)); }
     wheels.push({ steer, spin, front: wx > 0 });
   }
   return { group: g, model, wheels, nozzle, nozzleMat, pupils: [], glb: true };
@@ -959,7 +971,7 @@ function makeRacer(key, isAI, lat, z) {
   return r;
 }
 function clearRacers() {
-  racers.forEach(r => { scene.remove(r.m.group); r.m.group.traverse(o => { if (o.userData.shared) return; if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); });
+  racers.forEach(r => { scene.remove(r.m.group); r.m.group.traverse(o => { if (o.userData.shared) return; if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { if (m.userData.shared) return; if (m.map) m.map.dispose(); m.dispose(); }); }); });
   racers = []; player = null;
 }
 function setupRacers() {
