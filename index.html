@@ -105,7 +105,9 @@
   .tagline{text-align:center;color:#ddd;font-weight:800;margin:10px 0 18px}
   h3{font-family:var(--display);font-weight:400;font-size:16px;letter-spacing:.06em;color:var(--teal);margin:18px 0 10px}
   .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-  @media (max-width:640px){.cards{grid-template-columns:1fr}}
+  #levelCards{grid-template-columns:repeat(4,minmax(0,1fr))}
+  @media (max-width:900px){#levelCards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media (max-width:640px){.cards,#levelCards{grid-template-columns:1fr}}
   .pick{position:relative;text-align:left;border:3px solid transparent;background:rgba(255,255,255,.07);border-radius:14px;padding:12px 14px;color:#eee;display:flex;flex-direction:column;gap:6px;min-width:0}
   .pick:hover{background:rgba(255,255,255,.12)}
   .pick[aria-pressed="true"]{border-color:var(--gold);background:rgba(232,176,42,.14)}
@@ -309,8 +311,17 @@ const LEVELS = [
     aiSkill: 0.99, aiMistake: 0.05, gold: 0.35, twoBlock: 0.75, ballStar: 0.4,
     sky: ['#05081a', '#3b2a62'], fog: 0x1c1838, fogNear: 45, fogFar: 260, ground: '#26242e', road: '#3a3842',
     rocks: [0x4a4658, 0x5a4a5e, 0x3a3a4a], cactus: false, buildings: false, scrap: true, night: true,
-    hemi: [0x8fa8ff, 0x201830, 0.6], sun: [0xa0b4ff, 0.5], wall: [80, 95], edge: [0x3fe0d0, 0xe0409a], crate: 0x6d6a7a }
+    hemi: [0x8fa8ff, 0x201830, 0.6], sun: [0xa0b4ff, 0.5], wall: [80, 95], edge: [0x3fe0d0, 0xe0409a], crate: 0x6d6a7a },
+  // Stunt Peaks: a patchwork plank road on wooden stilts high above a snowy valley, with loop-the-loops
+  { id: 4, name: 'Stunt Peaks', sub: 'Snowy peaks · plank road on stilts, loop-the-loops', length: 1700,
+    curve: [[10, 1 / 64, 0.3], [3, 1 / 26, 1.1]], gap: [44, 58], rampEvery: 4, oil: 0, mover: null, moverEvery: 0,
+    aiSkill: 0.95, aiMistake: 0.1, gold: 0.35, twoBlock: 0.55, ballStar: 0.45,
+    sky: ['#86aed3', '#e9f1f7'], fog: 0xd6e3ee, fogNear: 90, fogFar: 460, ground: '#eef3f7', road: '#b8743f',
+    rocks: [0x6f8aa8, 0x8aa3bd, 0x5d7896], cactus: false, buildings: false, scrap: false, night: false,
+    hemi: [0xf2f7ff, 0x7f8fa8, 0.95], sun: [0xfff6ea, 0.95], wall: [120, 150], edge: [0xd8342c, 0xf5f2ea], crate: 0xb8743f,
+    stunt: true, valley: -46, loops: [-430, -1080] }
 ];
+const LOOP_R = 13, LOOP_SHIFT = 12;   // loop radius; the car drifts this far sideways so the way out clears the way in
 
 const ROAD_WIDTH = 24, ROAD_HALF = 12, LANES = [-8, 0, 8], TRACK_EXTRA = 170;
 const BRAKE = 70, MAX_REVERSE = 12, GRAVITY = 28, COLLECT_DISTANCE = 2.6, TRUCK_RADIUS = 2.6;
@@ -330,6 +341,15 @@ const slope = z => (cx(z + 0.5) - cx(z - 0.5));
 const roadAngle = z => Math.atan2(-1, -slope(z));   // the heading that points along the road
 const rotY = z => Math.atan(slope(z));               // rotation for meshes so they line up with the road
 const latOf = (x, z) => x - cx(z);
+// Road edges at z: normally ±(ROAD_HALF-2). Before a loop a barrier closes the left half (the loop comes back down there)
+function latBounds(z) {
+  let lo = -(ROAD_HALF - 2);
+  if (L.loops) for (const z0 of L.loops) {
+    const d = z - z0;                                   // > 0: still before the loop
+    if (d > 0 && d < LOOP_R + 70) lo = Math.max(lo, d < LOOP_R + 20 ? 0.5 : 0.5 - (d - LOOP_R - 20) / 50 * 10.5);
+  }
+  return [lo, ROAD_HALF - 2];
+}
 
 /* ---------- 4. 3D SETUP ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -461,12 +481,20 @@ function buildLevel(level) {
   const groundTex = canvasTex(256, 256, (g, w, h) => noise(g, w, h, L.ground, 0.12, 2600), true);
   groundTex.repeat.set(90, 90);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, L.length + 900), new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1 }));
-  ground.rotation.x = -Math.PI / 2; ground.position.set(0, -0.05, FINISH_Z / 2); ground.receiveShadow = true;
+  ground.rotation.x = -Math.PI / 2; ground.position.set(0, L.stunt ? L.valley : -0.05, FINISH_Z / 2); ground.receiveShadow = true;
   world.add(ground);
 
   // Road with painted lines
   const roadTex = canvasTex(256, 256, (g, w, h) => {
     noise(g, w, h, L.road, 0.18, 3000);
+    if (L.stunt) {   // patchwork of painted planks, like a stunt track built from scrap boards
+      const cols = ['#c97a43', '#b5663a', '#8f8a86', '#6e6b6a', '#5a9a4c', '#d68d50', '#a85a33'];
+      for (let y = 0; y < h; y += 32) for (let x = 0; x < w; x += 64) {
+        g.fillStyle = cols[(x * 7 + y * 3 + ((x * y) % 5)) % cols.length]; g.fillRect(x, y, 64, 32);
+        g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x, y, 64, 2); g.fillRect(x, y, 2, 32);
+        g.fillStyle = 'rgba(255,255,255,0.06)'; for (let k = 0; k < 4; k++) g.fillRect(x + 4, y + 6 + k * 6, 56, 1);
+      }
+    }
     g.fillStyle = L.night ? '#9ff3ea' : '#f2ead8';
     g.fillRect(6, 0, 7, h); g.fillRect(w - 13, 0, 7, h);
     g.fillRect(w / 3 - 3, 0, 6, h * 0.5); g.fillRect(w * 2 / 3 - 3, 0, 6, h * 0.5);
@@ -476,7 +504,9 @@ function buildLevel(level) {
   const road = new THREE.Mesh(stripGeo(30, END, 3, ROAD_HALF, 14), roadMat);
   road.position.y = 0.01; road.receiveShadow = true; world.add(road);
   // Kerb strips just outside the road
-  const kerbMat = new THREE.MeshStandardMaterial({ color: L.night ? 0x2b2938 : 0xc9a27a, roughness: 1 });
+  const kerbMat = L.stunt
+    ? new THREE.MeshStandardMaterial({ map: canvasTex(64, 64, (g, w, h) => { for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { g.fillStyle = (i + j) % 2 ? '#d8342c' : '#f5f2ea'; g.fillRect(i * 16, j * 16, 16, 16); } }, true), roughness: 0.9 })
+    : new THREE.MeshStandardMaterial({ color: L.night ? 0x2b2938 : 0xc9a27a, roughness: 1 });
   for (const s of [-1, 1]) {
     const k = new THREE.Mesh(stripGeo(30, END, 3, 2.2, 14), kerbMat);
     k.position.set(s * (ROAD_HALF + 2.2), 0.005, 0); k.receiveShadow = true; world.add(k);
@@ -499,6 +529,7 @@ function buildLevel(level) {
   addTo(world, new THREE.BoxGeometry(ROAD_WIDTH + 2.4, 3, 1.5), barMats[0], cx(END), 1.5, END);
 
   buildScenery(END);
+  if (L.stunt) buildStunt(END);
 
   // Gates
   addGate(-8, 'START', false);
@@ -506,10 +537,13 @@ function buildLevel(level) {
   addGate(FINISH_Z, 'FINISH', true);
 
   buildCourse();
+  // gold balls riding round each loop
+  if (L.loops) for (const z0 of L.loops) for (let k = 1; k < 10; k++) { const p = loopPoint(z0, k / 10 * Math.PI * 2, 1.6); addBall(p.lat, p.z, p.y, k === 5); balls[balls.length - 1].baseY = p.y; balls[balls.length - 1].loopBall = true; }
   TOTAL_BALLS = balls.reduce((s, b) => s + b.value, 0);
 }
 
 function buildScenery(END) {
+  if (L.stunt) return;   // Stunt Peaks builds its own valley in buildStunt
   // Rocks
   const rockGeo = new THREE.DodecahedronGeometry(1, 0);
   const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true });
@@ -591,6 +625,98 @@ function buildScenery(END) {
       dummy.position.set(x - s * 2, 0.06, z); dummy.rotation.set(-Math.PI / 2, 0, 0); dummy.updateMatrix(); halo.setMatrixAt(i, dummy.matrix);
     });
     world.add(poles, bulbs, halo);
+  }
+}
+
+/* Stunt Peaks: deck and stilts under the road, tyre walls, snowy mountains and the loop-the-loops */
+function loopPoint(z0, th, lift = 0) {   // a point on the loop: th 0..2π, lift = distance in from the track surface
+  const lat = LOOP_SHIFT / 2 - LOOP_SHIFT * th / (Math.PI * 2);
+  const rr = LOOP_R - lift, z = z0 - rr * Math.sin(th), y = LOOP_R - rr * Math.cos(th);
+  return { x: cx(z) + lat, y, z, lat };
+}
+function buildStunt(END) {
+  const V = L.valley;
+  // a thick wooden deck under the road
+  const deck = new THREE.Mesh(stripGeo(30, END, 3, ROAD_HALF + 4.6, 14), mat(0x6b4a30));
+  deck.position.y = -1.6; world.add(deck);
+  // stilts: posts down to the snow every 18 m, with cross braces
+  const posts = [], braces = [];
+  for (let z = 24; z > END; z -= 18) {
+    const loopNear = L.loops.some(z0 => Math.abs(z - z0) < LOOP_R + 4);
+    for (const s of [-1, 1]) posts.push([cx(z) + s * (ROAD_HALF + 3.5), z]);
+    if (!loopNear) braces.push(z);
+  }
+  const postIM = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, 1, 1.2), mat(0x5a3d27), posts.length);
+  posts.forEach(([x, z], i) => { dummy.position.set(x, (V - 1.6) / 2, z); dummy.rotation.set(0, rotY(z), 0); dummy.scale.set(1, -V, 1); dummy.updateMatrix(); postIM.setMatrixAt(i, dummy.matrix); });
+  const braceIM = new THREE.InstancedMesh(new THREE.BoxGeometry(ROAD_WIDTH + 9, 0.6, 0.6), mat(0x7a5638), braces.length * 3);
+  braces.forEach((z, i) => [0.25, 0.5, 0.75].forEach((f, k) => {
+    dummy.position.set(cx(z), V * f, z); dummy.rotation.set(0, rotY(z), k % 2 ? 0.55 : -0.55); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); braceIM.setMatrixAt(i * 3 + k, dummy.matrix);
+  }));
+  postIM.castShadow = braceIM.castShadow = true; world.add(postIM, braceIM);
+  // tyre walls standing along both edges
+  const tz = []; for (let z = 26; z > END; z -= 2.4) tz.push(z);
+  const tyres = new THREE.InstancedMesh(new THREE.TorusGeometry(0.85, 0.42, 8, 16), mat(0x1e1e22, { roughness: 0.95 }), tz.length * 2);
+  let n = 0;
+  tz.forEach(z => { for (const s of [-1, 1]) { dummy.position.set(cx(z) + s * (ROAD_HALF + 2.3), 0.95, z); dummy.rotation.set(0, rotY(z) + Math.PI / 2, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); tyres.setMatrixAt(n++, dummy.matrix); } });
+  tyres.castShadow = true; world.add(tyres);
+  // snowy mountains round the valley
+  const rockM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true }), snowM = mat(0xf7fbff, { flatShading: true });
+  const peaks = []; for (let z = 60; z > END - 200; z -= random(55, 90)) for (const s of [-1, 1]) peaks.push([cx(z) + s * random(140, 330), z, random(70, 140), random(90, 210)]);
+  const rockIM = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 6), rockM, peaks.length), capIM = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 6), snowM, peaks.length);
+  const col = new THREE.Color();
+  peaks.forEach(([x, z, r, h], i) => {
+    const ry = random(0, 3);
+    dummy.position.set(x, V + h / 2, z); dummy.rotation.set(0, ry, 0); dummy.scale.set(r, h, r); dummy.updateMatrix(); rockIM.setMatrixAt(i, dummy.matrix); rockIM.setColorAt(i, col.setHex(pick(L.rocks)));
+    dummy.position.set(x, V + h * 0.83, z); dummy.scale.set(r * 0.36, h * 0.35, r * 0.36); dummy.updateMatrix(); capIM.setMatrixAt(i, dummy.matrix);
+  });
+  world.add(rockIM, capIM);
+  // the loops
+  const plankTex = canvasTex(256, 256, (g, w, h) => {
+    const cols = ['#c97a43', '#b5663a', '#d68d50', '#5a9a4c', '#4a8a3e'];
+    for (let y = 0; y < h; y += 32) for (let x = 0; x < w; x += 128) { g.fillStyle = cols[((x >> 7) + (y >> 5) * 3) % cols.length]; g.fillRect(x, y, 128, 32); g.fillStyle = 'rgba(0,0,0,0.2)'; g.fillRect(x, y, 128, 2); g.fillRect(x, y, 2, 32); }
+  }, true);
+  plankTex.repeat.set(1, 1);
+  const loopMat = new THREE.MeshStandardMaterial({ map: plankTex, roughness: 0.85, side: THREE.DoubleSide });
+  const railMats = [mat(0xd8342c), mat(0xf5f2ea)];
+  for (const z0 of L.loops) {
+    const N = 120, pos = [], uv = [], idx = [], half = 7;
+    for (let i = 0; i <= N; i++) {
+      const th = i / N * Math.PI * 2, p = loopPoint(z0, th, -0.15), c = cx(p.z);
+      for (const s of [-1, 1]) { pos.push(c + p.lat + s * half, p.y, p.z); uv.push(s < 0 ? 0 : 1, i / N * 12); }
+      if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    const ring = new THREE.Mesh(geo, loopMat); ring.castShadow = ring.receiveShadow = true; world.add(ring);
+    // red and white rails along both edges of the loop
+    const rails = railMats.map(m => new THREE.InstancedMesh(new THREE.BoxGeometry(0.7, 1.1, 1), m, N + 2)), rc = [0, 0];
+    const bx = new THREE.Vector3(), by = new THREE.Vector3(), bz = new THREE.Vector3(), M = new THREE.Matrix4();
+    for (let i = 0; i < N; i++) {
+      const a = loopPoint(z0, i / N * Math.PI * 2, 0.4), b = loopPoint(z0, (i + 1) / N * Math.PI * 2, 0.4);
+      bz.set(b.x - a.x, b.y - a.y, b.z - a.z); const len = bz.length(); bz.normalize();
+      by.set(0, LOOP_R - (a.y + b.y) / 2, z0 - (a.z + b.z) / 2).normalize(); bx.crossVectors(by, bz).normalize(); by.crossVectors(bz, bx);
+      for (const s of [-1, 1]) {
+        const k = Math.floor(i / 3) % 2;
+        M.makeBasis(bx, by, bz).scale(new THREE.Vector3(1, 1, len * 1.05));
+        M.setPosition((a.x + b.x) / 2 + bx.x * s * (half - 0.35), (a.y + b.y) / 2 + bx.y * s * (half - 0.35), (a.z + b.z) / 2 + bx.z * s * (half - 0.35));
+        if (rc[k] < N + 2) rails[k].setMatrixAt(rc[k]++, M);
+      }
+    }
+    rails.forEach((r, k) => { r.count = rc[k]; world.add(r); });
+    // a wooden frame holding the loop up
+    const frameM = mat(0x6b4a30);
+    for (const s of [-1, 1]) for (const dz of [-LOOP_R, 0, LOOP_R]) {   // posts stand outside the tyre walls, clear of the road
+      const z = z0 + dz, h = dz === 0 ? 2 * LOOP_R + 3.2 : LOOP_R + 1;
+      addTo(world, new THREE.BoxGeometry(1.4, h - V, 1.4), frameM, cx(z) + s * (ROAD_HALF + 4), (h + V) / 2, z);
+    }
+    addTo(world, new THREE.BoxGeometry(2 * ROAD_HALF + 9.5, 1.3, 1.6), frameM, cx(z0), 2 * LOOP_R + 2.6, z0).rotation.y = rotY(z0);   // beam over the top
+    // the barrier that closes the left half before the loop, and the MAKE WAY arch
+    const bz2 = []; for (let z = z0 + 1; z < z0 + LOOP_R + 70; z += 3) bz2.push(z);
+    const wall = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, 1.6, 3), mat(0xffffff), bz2.length);
+    bz2.forEach((z, i) => { const [lo] = latBounds(z); dummy.position.set(cx(z) + lo - 1, 0.8, z); dummy.rotation.set(0, rotY(z) + (z > z0 + LOOP_R + 20 ? 0.2 : 0), 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); wall.setMatrixAt(i, dummy.matrix); wall.setColorAt(i, col.setHex(i % 2 ? 0xd8342c : 0xf5f2ea)); });
+    world.add(wall);
+    addGate(z0 + LOOP_R + 24, 'MAKE WAY', false);
   }
 }
 
@@ -696,6 +822,7 @@ function buildCourse() {
   let rowZ = -70, row = 0;
   const builders = L.night ? [addCrate, addBarrier, addTyres] : [addCrate, addBarrier, addCrate, addTyres];
   while (rowZ > FINISH_Z + 50) {
+    if (L.loops && L.loops.some(z0 => rowZ < z0 + LOOP_R + 110 && rowZ > z0 - LOOP_R - 30)) { rowZ -= 12; continue; }
     row++;
     const useRamp = row % L.rampEvery === 0 && rowZ < -110;
     const useMover = L.mover && L.moverEvery && row % L.moverEvery === 1 && rowZ < -150 && !useRamp;
@@ -1054,6 +1181,21 @@ function rampUnder(r) {
 }
 function updateRacer(r, inp, dt) {
   const st = r.def;
+  if (r.loop) {   // carried round the loop: forward speed keeps going, steering does nothing until it's done
+    const lp = r.loop;
+    lp.th += lp.speed / LOOP_R * dt;
+    if (lp.th >= Math.PI * 2) {
+      r.loop = null; r.y = 0; r.vy = 0;
+      const p = loopPoint(lp.z0, Math.PI * 2); r.x = p.x; r.z = lp.z0 - 0.5;
+      r.vx = Math.cos(r.angle) * lp.speed; r.vz = Math.sin(r.angle) * lp.speed; r.fwd = lp.speed;
+      if (r === player) { toast('LOOP-THE-LOOP! +BOOST', 1.2, '#ffd23f'); r.boost = Math.min(100, r.boost + 18); tone(660, 0.2, 'triangle', 0.14, 990); }
+    } else {
+      const p = loopPoint(lp.z0, lp.th); r.x = p.x; r.y = p.y; r.z = p.z;
+      r.angle = roadAngle(r.z); r.vx = 0; r.vz = 0; r.fwd = lp.speed; r.vacuum = inp.vacuum;
+    }
+    return 0;
+  }
+  const zBefore = r.z;
   let maxS = st.maxSpeed * r.speedMul;
   r.vacuum = inp.vacuum;
   if (inp.vacuum) maxS *= 0.72;
@@ -1082,10 +1224,17 @@ function updateRacer(r, inp, dt) {
 
   r.x += r.vx * dt; r.z += r.vz * dt;
 
+  // Into a loop? Anyone crossing the loop's foot on the ground gets carried round (with a bit of help if slow)
+  if (L.loops && r.y < 1) for (const z0 of L.loops) if (zBefore > z0 && r.z <= z0) {
+    r.loop = { z0, th: 0, speed: Math.max(fwd, 30) };
+    r.x = loopPoint(z0, 0).x; r.z = z0;
+    return 0;
+  }
+
   // Road edges: slide along the barrier, lose a bit of speed
-  const lat = latOf(r.x, r.z), limit = ROAD_HALF - 2;
-  if (Math.abs(lat) > limit) {
-    const sgn = Math.sign(lat);
+  const lat = latOf(r.x, r.z), [loLat, hiLat] = latBounds(r.z);
+  if (lat > hiLat || lat < loLat) {
+    const sgn = lat > hiLat ? 1 : -1, limit = sgn > 0 ? hiLat : -loLat;
     r.x = cx(r.z) + sgn * limit;
     const s = slope(r.z), n = Math.hypot(1, s), nx = 1 / n, nz = -s / n;
     const into = (r.vx * nx + r.vz * nz) * sgn;
@@ -1222,8 +1371,8 @@ function syncModel(r, steer, dt) {
   const sp = Math.hypot(r.vx, r.vz), ratio = clamp(sp / 45, 0, 1);
   r.steerVis = lerp(r.steerVis, steer, Math.min(1, 10 * dt));
   r.m.model.rotation.x = -r.steerVis * ratio * 0.07;
-  r.m.model.rotation.z = r.y > 0.1 ? clamp(r.vy * 0.025, -0.25, 0.25) : 0;
-  r.m.model.position.y = r.y > 0.1 ? 0 : Math.sin(time * 18 + r.ai.wobble) * 0.04 * ratio;
+  r.m.model.rotation.z = r.loop ? r.loop.th : r.y > 0.1 ? clamp(r.vy * 0.025, -0.25, 0.25) : 0;
+  r.m.model.position.y = r.y > 0.1 || r.loop ? 0 : Math.sin(time * 18 + r.ai.wobble) * 0.04 * ratio;
   r.wheelRot -= r.fwd * dt / 0.85;
   r.m.wheels.forEach(w => { w.spin.rotation.z = r.wheelRot; if (w.front) w.steer.rotation.y = -r.steerVis * 0.4; });
   const on = r.vacuum;
@@ -1264,6 +1413,7 @@ function aiInput(r, dt) {
   if (a.reverse > 0) { a.reverse -= dt; return { throttle: 0, brake: 1, steer: clamp((lat - a.target) * 0.3, -1, 1), vacuum: false, boost: false }; }
   a.think -= dt;
   if (a.think <= 0) { a.think = random(0.15, 0.3); a.target = chooseLane(r, lat); }
+  { const [lo, hi] = latBounds(r.z - 25 - Math.max(0, r.fwd) * 0.6); a.target = clamp(a.target, lo + 2.5, hi - 1); }   // stay out of closed lanes
   const ra = roadAngle(r.z - Math.max(4, r.fwd * 0.3));
   const desired = ra + clamp((a.target - lat) * 0.085, -0.5, 0.5);
   const steer = clamp((desired - r.angle) * 4.5, -1, 1);
@@ -1283,7 +1433,10 @@ function aiInput(r, dt) {
 }
 
 /* ---------- 14. BALLS ---------- */
-function nozzleOf(r) { return { x: r.x + Math.cos(r.angle) * 4.2, z: r.z + Math.sin(r.angle) * 4.2, y: r.y + 1.5 }; }
+function nozzleOf(r) {
+  if (r.loop) { const p = loopPoint(r.loop.z0, r.loop.th + 4.2 / LOOP_R, 1.5); return { x: p.x, z: p.z, y: p.y }; }
+  return { x: r.x + Math.cos(r.angle) * 4.2, z: r.z + Math.sin(r.angle) * 4.2, y: r.y + 1.5 };
+}
 const ballsEl = $('balls');
 function updateBalls(dt) {
   const noz = racers.map(nozzleOf);
@@ -1456,10 +1609,12 @@ function updateCamera(dt, snap) {
     const camAngle = ra + (player.angle - ra) * 0.35;
     const fx = Math.cos(camAngle), fz = Math.sin(camAngle);
     const desired = new THREE.Vector3(player.x - fx * 11, 5.5 + player.y * 0.6, player.z - fz * 11);
+    if (player.loop) desired.set(cx(player.loop.z0) - 34, LOOP_R * 1.05, player.loop.z0 + 6);   // swing out to the side to watch the loop
     const k = snap ? 1 : 1 - Math.exp(-6 * dt);
     camera.position.lerp(desired, k);
     if (shake > 0) { camera.position.x += (Math.random() - 0.5) * shake * 0.8; camera.position.y += (Math.random() - 0.5) * shake * 0.8; shake = Math.max(0, shake - dt * 3); }
     camTarget.set(player.x + fx * 16, 1.5 + player.y * 0.5, player.z + fz * 16);
+    if (player.loop) camTarget.set(player.x, player.y, player.z);
     camera.lookAt(camTarget);
     const speed = Math.hypot(player.vx, player.vz);
     const fov = 65 + (speed / 45) * 14 + (player.boosting ? 8 : 0);

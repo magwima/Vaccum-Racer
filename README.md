@@ -1,6 +1,6 @@
 # Vacuum Racer
 
-A 3D racing game in the browser. Pick Dave, Rosie or Dasz, race across three tracks (Dusty Dunes, Canyon Twist and Scrapyard Night), suck up the balls, boost into rivals to make them spill, and fly over ramps.
+A 3D racing game in the browser. Pick Dave, Rosie or Dasz, race across four tracks (Dusty Dunes, Canyon Twist, Scrapyard Night and Stunt Peaks, a plank road on stilts over a snowy valley with loop-the-loops), suck up the balls, boost into rivals to make them spill, and fly over ramps.
 
 ## Play
 
