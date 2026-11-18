@@ -1,6 +1,6 @@
 /* Vacuum Racer offline cache. Change VERSION whenever you upload a new index.html, so players get the update. */
-const VERSION = 'vacuum-racer-v3';
-const CORE = ['./', 'index.html', 'three.min.js', 'GLTFLoader.js', 'models/mini.glb', 'models/mini-wheel.png', 'models/mini-tread.jpg', 'models/rosie.glb', 'models/dasz.glb', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
+const VERSION = 'vacuum-racer-v4';
+const CORE = ['./', 'index.html', 'three.min.js', 'GLTFLoader.js', 'models/mini.glb', 'models/mini-wheel.png', 'models/mini-tread.jpg', 'models/rosie.glb', 'models/dasz.glb', 'models/dasz-wheel.glb', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
